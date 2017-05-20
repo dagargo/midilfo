@@ -1,0 +1,8 @@
+[Desktop Entry]
+Version=1.0
+Name=MIDI LFO
+Keywords=midi lfo
+Exec=/usr/local/bin/midilfo
+Icon=midilfo
+Terminal=false
+Type=Application
