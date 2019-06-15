@@ -17,7 +17,7 @@
 # You should have received a copy of the GNU General Public License
 # along with MIDI LFO. If not, see <http://www.gnu.org/licenses/>.
 
-"""MIDI LFO backend"""
+"""MIDI LFO LFO"""
 
 import mido
 import time
@@ -34,16 +34,19 @@ logger.debug('Mido backend: {:s}'.format(str(mido.backend)))
 MAX_PHASE = 1000000
 
 
-class Backend(object):
+class LFO(object):
 
     def __init__(self):
         logger.debug('Initializing...')
         self.thread = None
         self.port = None
         self.channel = 0
-        self.control = 19
-        self.min = 0
-        self.max = 127
+        self.msb_control = 19
+        self.lsb_control = 51
+        self.total_bits = 7
+        self.lsb_bits = 7
+        self.min = 0.0
+        self.max = 1.0
         self.f = 0.125
         self.set_sampling_period(0.03)
         self.set_frequency(0.125)
@@ -100,19 +103,31 @@ class Backend(object):
             reset = False
         fraction = float(self.phase) / MAX_PHASE
         value = self.shaper(fraction, reset)
-        return int((value * (self.max - self.min)) + self.min)
+        return (value * (self.max - self.min)) + self.min
 
     def lfo_loop(self):
         last_value = -1
+        last_msb = -1
         while self.running:
             value = self.get_next_value()
             if value != last_value:
-                self.change_value_callback(value / 127.0)
+                self.change_value_callback(value)
                 last_value = value
-                msg = mido.Message('control_change', channel=self.channel,
-                                   control=self.control, value=value)
                 if self.port:
-                    self.port.send(msg)
+                    int_value = int(value * (2 ** self.total_bits - 1))
+                    msb_value = int_value >> self.lsb_bits
+                    lsb_value = int_value & ((2 ** self.lsb_bits) - 1)
+
+                    if (last_msb != msb_value):
+                        msg = mido.Message('control_change', channel=self.channel,
+                                           control=self.msb_control, value=msb_value)
+                        self.port.send(msg)
+                        last_msb = msb_value
+
+                    if (self.lsb_bits > 0):
+                        msg = mido.Message('control_change', channel=self.channel,
+                                           control=self.lsb_control, value=lsb_value)
+                        self.port.send(msg)
             time.sleep(self.sampling_period)
 
     def get_sine_value(self, value, reset):

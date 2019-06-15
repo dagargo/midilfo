@@ -17,18 +17,19 @@
 # You should have received a copy of the GNU General Public License
 # along with MIDI LFO. If not, see <http://www.gnu.org/licenses/>.
 
-"""MIDI LFO user interface"""
-
 import gi
 gi.require_version('Gtk', '3.0')
 from gi.repository import Gtk
 from gi.repository import GLib
-import logging
-import pkg_resources
-from midilfo.backend import Backend
-import sys
-import getopt
 import mido
+import getopt
+import sys
+from midilfo.lfo import LFO
+import pkg_resources
+import logging
+"""MIDI LFO user interface"""
+
+gi.require_version('Gtk', '3.0')
 
 PKG_NAME = 'midilfo'
 
@@ -42,6 +43,7 @@ log_level = logging.ERROR
 
 def print_help():
     print('Usage: {:s} [-v]'.format(PKG_NAME))
+
 
 try:
     opts, args = getopt.getopt(sys.argv[1:], "hv")
@@ -66,8 +68,8 @@ class Frontend(object):
     """MIDI LFO user interface"""
 
     def __init__(self):
-        self.backend = Backend()
-        self.backend.change_value_callback = self.set_lfo_value
+        self.lfo = LFO()
+        self.lfo.change_value_callback = self.set_lfo_value
         self.main_window = None
 
     def init_ui(self):
@@ -90,10 +92,14 @@ class Frontend(object):
         self.run = builder.get_object('run')
         self.frequency = builder.get_object('frequency')
         self.wave = builder.get_object('wave')
-        self.control = builder.get_object('control')
+        self.msb_control = builder.get_object('msb_control')
+        self.lsb_control = builder.get_object('lsb_control')
         self.channel = builder.get_object('channel')
         self.minimum = builder.get_object('minimum')
         self.maximum = builder.get_object('maximum')
+        self.lsb = builder.get_object('lsb')
+        self.total_bits = builder.get_object('total_bits')
+        self.lsb_bits = builder.get_object('lsb_bits')
 
         self.device.connect('changed', lambda widget: self.set_device(widget))
         self.run.connect(
@@ -101,24 +107,47 @@ class Frontend(object):
         self.frequency.connect(
             'value-changed', lambda widget: self.set_frequency(widget))
         self.wave.connect('changed', lambda widget: self.set_wave(widget))
-        self.control.connect(
-            'value-changed', lambda widget: self.set_control(widget))
+        self.msb_control.connect(
+            'value-changed', lambda widget: self.set_msb_control(widget))
+        self.lsb_control.connect(
+            'value-changed', lambda widget: self.set_lsb_control(widget))
         self.channel.connect(
             'value-changed', lambda widget: self.set_channel(widget))
         self.minimum.connect(
             'value-changed', lambda widget: self.set_minimum(widget))
         self.maximum.connect(
             'value-changed', lambda widget: self.set_maximum(widget))
+        self.lsb.connect(
+            'state-set', lambda widget, state: self.switch_lsb(state, widget))
+        self.total_bits.connect(
+            'value-changed', lambda widget: self.set_total_bits(widget))
+        self.lsb_bits.connect(
+            'value-changed', lambda widget: self.set_lsb_bits(widget))
 
         self.load_devices()
         self.set_device(self.device)
         self.set_frequency(self.frequency)
         self.set_wave(self.wave)
-        self.set_control(self.control)
+        self.set_msb_control(self.msb_control)
+        self.set_lsb_control(self.lsb_control)
         self.set_channel(self.channel)
         self.set_minimum(self.minimum)
         self.set_maximum(self.maximum)
+        self.switch_lsb(False, self.lsb)
         self.main_window.present()
+
+    def switch_lsb(self, value, switch):
+        switch.set_state(value)
+        switch.set_active(value)
+        if value:
+            self.lfo.total_bits = self.total_bits.get_value_as_int()
+            self.lfo.lsb_bits = self.lsb_bits.get_value_as_int()
+        else:
+            self.lfo.total_bits = 7
+            self.lfo.lsb_bits = 0
+        self.lsb_control.set_sensitive(value)
+        self.total_bits.set_sensitive(value)
+        self.lsb_bits.set_sensitive(value)
 
     def set_lfo_value(self, value):
         GLib.idle_add(self.value.set_fraction, value)
@@ -137,47 +166,64 @@ class Frontend(object):
     def set_device(self, combo):
         if combo.get_active() != -1:
             value = combo.get_model()[combo.get_active()][0]
-            self.backend.connect(value)
+            self.lfo.connect(value)
 
     def set_run(self, value, switch):
         switch.set_state(value)
         switch.set_active(value)
         if value:
-            self.backend.start()
+            self.lfo.start()
         else:
-            self.backend.stop()
+            self.lfo.stop()
 
     def set_frequency(self, scale):
-        self.backend.set_frequency(scale.get_value())
+        self.lfo.set_frequency(scale.get_value())
 
     def set_wave(self, combo):
         wave = combo.get_active()
         if wave == 0:
-            self.backend.shaper = self.backend.get_noise_value
+            self.lfo.shaper = self.lfo.get_noise_value
         elif wave == 1:
-            self.backend.shaper = self.backend.get_s_n_h_value
+            self.lfo.shaper = self.lfo.get_s_n_h_value
         elif wave == 2:
-            self.backend.shaper = self.backend.get_saw_down_value
+            self.lfo.shaper = self.lfo.get_saw_down_value
         elif wave == 3:
-            self.backend.shaper = self.backend.get_saw_up_value
+            self.lfo.shaper = self.lfo.get_saw_up_value
         elif wave == 4:
-            self.backend.shaper = self.backend.get_sine_value
+            self.lfo.shaper = self.lfo.get_sine_value
         elif wave == 5:
-            self.backend.shaper = self.backend.get_square_value
+            self.lfo.shaper = self.lfo.get_square_value
         elif wave == 6:
-            self.backend.shaper = self.backend.get_triangle_value
+            self.lfo.shaper = self.lfo.get_triangle_value
 
-    def set_control(self, spin):
-        self.backend.control = spin.get_value_as_int()
+    def set_total_bits(self, spin):
+        total_bits = self.total_bits.get_value_as_int()
+        lsb_bits = self.lsb_bits.get_value_as_int()
+        lsb_bits = total_bits - 7 if total_bits - lsb_bits > 7 else lsb_bits
+        self.lsb_bits.set_value(lsb_bits)
+        self.lfo.total_bits = total_bits
+
+    def set_lsb_bits(self, spin):
+        total_bits = self.total_bits.get_value_as_int()
+        lsb_bits = self.lsb_bits.get_value_as_int()
+        total_bits = lsb_bits + 7 if total_bits - lsb_bits > 7 else total_bits
+        self.total_bits.set_value(total_bits)
+        self.lfo.lsb_bits = lsb_bits
+
+    def set_msb_control(self, spin):
+        self.lfo.msb_control = spin.get_value_as_int()
+
+    def set_lsb_control(self, spin):
+        self.lfo.lsb_control = spin.get_value_as_int()
 
     def set_channel(self, spin):
-        self.backend.channel = spin.get_value_as_int()
+        self.lfo.channel = spin.get_value_as_int()
 
     def set_minimum(self, scale):
-        self.backend.min = scale.get_value()
+        self.lfo.min = scale.get_value()
 
     def set_maximum(self, scale):
-        self.backend.max = scale.get_value()
+        self.lfo.max = scale.get_value()
 
     def show_about(self):
         self.about_dialog.run()
@@ -185,8 +231,8 @@ class Frontend(object):
 
     def quit(self):
         logger.debug('Quitting...')
-        self.backend.stop()
-        self.backend.disconnect()
+        self.lfo.stop()
+        self.lfo.disconnect()
         self.main_window.hide()
         Gtk.main_quit()
 
