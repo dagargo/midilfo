@@ -1,5 +1,12 @@
 #!/usr/bin/env python3
 
 from midilfo.frontend import Frontend
+import signal
 
-Frontend().main()
+def quit(signum, frame):
+    frontend.quit()
+
+signal.signal(signal.SIGINT, quit)
+
+frontend = Frontend()
+frontend.main()
