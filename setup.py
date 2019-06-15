@@ -4,7 +4,7 @@ from distutils.core import setup
 from setuptools import find_packages
 
 setup(name='MIDILFO',
-    version='1.0',
+    version='1.1',
     description='MIDI LFO',
     author='David García Goñi',
     author_email='dagargo@gmail.com',
